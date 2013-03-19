@@ -20,10 +20,10 @@ clean:
 tests: clean app eunit ct
 
 eunit:
-	@$(REBAR) eunit skip_deps=true
+	@$(REBAR) -C rebar.test.config eunit skip_deps=true
 
 ct:
-	@$(REBAR) ct skip_deps=true
+	@$(REBAR) -C rebar.test.config ct skip_deps=true
 
 build-plt:
 	@$(DIALYZER) --build_plt --output_plt .$(APPNAME)_dialyzer.plt \

@@ -1,8 +1,8 @@
 {application, goldrush, [
-    {description, ""},
-    {vsn, "0.1.0"},
+    {description, "Erlang event stream processor"},
+    {vsn, "0.1.1"},
     {registered, []},
-    {applications, [kernel, stdlib, syntax_tools]},
+    {applications, [kernel, stdlib, syntax_tools, compiler]},
     {mod, {gr_app, []}},
     {env, []}
 ]}.

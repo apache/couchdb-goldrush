@@ -64,7 +64,9 @@
 -export([
     compile/2,
     handle/2,
-    delete/1
+    delete/1,
+    reset_counters/1,
+    reset_counters/2
 ]).
 
 -export([
@@ -184,7 +186,7 @@ handle(Module, Event) ->
 %%
 %% This releases all resources allocated by a compiled query. The query name
 %% is expected to be associated with an existing query module. Calling this
-%% function will result in a runtime error.
+%% function will shutdown all relevant processes and purge/delete the module.
 -spec delete(atom()) -> ok.
 delete(Module) ->
     Params = params_name(Module),
@@ -204,6 +206,19 @@ delete(Module) ->
     code:delete(Module),
     ok.
 
+%% @doc Reset all counters
+%%
+%% This resets all the counters associated with a module
+-spec reset_counters(atom()) -> ok.
+reset_counters(Module) ->
+    Module:reset_counters(all).
+
+%% @doc Reset a specific counter
+%%
+%% This resets a specific counter associated with a module
+-spec reset_counters(atom(), atom()) -> ok.
+reset_counters(Module, Counter) ->
+    Module:reset_counters(Counter).
 
 %% @private Map a query to a module data term.
 -spec module_data(atom(), term()) -> {ok, #module{}}.
@@ -452,6 +467,34 @@ events_test_() ->
                     ?assertEqual(undefined, whereis(counts_name(Mod))),
                     ?assertEqual(undefined, whereis(manage_params_name(Mod))),
                     ?assertEqual(undefined, whereis(manage_counts_name(Mod)))
+                end
+            },
+            {"reset counters test",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod14,
+                        glc:any([glc:eq(a, 1), glc:eq(b, 2)])),
+                    glc:handle(Mod, gre:make([{'a', 2}], [list])),
+                    glc:handle(Mod, gre:make([{'b', 1}], [list])),
+                    ?assertEqual(2, Mod:info(input)),
+                    ?assertEqual(2, Mod:info(filter)),
+                    glc:handle(Mod, gre:make([{'a', 1}], [list])),
+                    glc:handle(Mod, gre:make([{'b', 2}], [list])),
+                    ?assertEqual(4, Mod:info(input)),
+                    ?assertEqual(2, Mod:info(filter)),
+                    ?assertEqual(2, Mod:info(output)),
+
+                    glc:reset_counters(Mod, input),
+                    ?assertEqual(0, Mod:info(input)),
+                    ?assertEqual(2, Mod:info(filter)),
+                    ?assertEqual(2, Mod:info(output)),
+                    glc:reset_counters(Mod, filter),
+                    ?assertEqual(0, Mod:info(input)),
+                    ?assertEqual(0, Mod:info(filter)),
+                    ?assertEqual(2, Mod:info(output)),
+                    glc:reset_counters(Mod),
+                    ?assertEqual(0, Mod:info(input)),
+                    ?assertEqual(0, Mod:info(filter)),
+                    ?assertEqual(0, Mod:info(output))
                 end
             }
         ]

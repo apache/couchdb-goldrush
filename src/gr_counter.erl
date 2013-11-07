@@ -19,7 +19,7 @@
 %% API
 -export([start_link/1, 
          list/1, lookup_element/2,
-         update/3]).
+         update/3, reset_counters/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -42,6 +42,9 @@ lookup_element(Server, Counter) ->
 
 update(Server, Counter, Value) ->
     gen_server:cast(Server, {update, Counter, Value}).
+
+reset_counters(Server, Counter) ->
+    gen_server:call(Server, {reset_counters, Counter}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -91,6 +94,15 @@ handle_call(list, _From, State) ->
 handle_call({lookup_element, Counter}, _From, State) ->
     TableId = State#state.table_id,
     {reply, ets:lookup_element(TableId, Counter, 2), State};
+handle_call({reset_counters, Counter}, _From, State) ->
+    TableId = State#state.table_id,
+    Reset = case Counter of
+        _ when is_list(Counter) -> 
+            [{Item, 0} || Item <- Counter];
+        _ when is_atom(Counter) -> 
+            [{Counter, 0}]
+    end,
+    {reply, ets:insert(TableId, Reset), State};
 handle_call(_Request, _From, State) ->
     Reply = {error, unhandled_message},
     {reply, Reply, State}.

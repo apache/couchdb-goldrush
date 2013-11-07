@@ -60,6 +60,10 @@ abstract_module_(Module, #module{tables=Tables, qtree=Tree}=Data) ->
         ?erl:arity_qualifier(
             ?erl:atom(info),
             ?erl:integer(1)),
+        %% reset_counters/1
+        ?erl:arity_qualifier(
+            ?erl:atom(reset_counters),
+            ?erl:integer(1)),
         %% table/1
         ?erl:arity_qualifier(
             ?erl:atom(table),
@@ -76,7 +80,14 @@ abstract_module_(Module, #module{tables=Tables, qtree=Tree}=Data) ->
         [?erl:clause(
             [?erl:underscore()], none,
                 [abstract_apply(erlang, error, [?erl:atom(badarg)])])]),
-     %% table(Name) -> ets:tid().
+     %% reset_counters(Name) -> boolean().
+     ?erl:function(
+        ?erl:atom(reset_counters),
+        abstract_reset() ++
+        [?erl:clause(
+            [?erl:underscore()], none,
+                [abstract_apply(erlang, error, [?erl:atom(badarg)])])]),
+     %% table(Name) -> atom().
      ?erl:function(
         ?erl:atom(table),
         abstract_tables(Tables) ++
@@ -119,6 +130,17 @@ abstract_info(#module{'query'=Query}) ->
         {filter, abstract_getcount(filter)},
         {output, abstract_getcount(output)}
     ]].
+
+
+abstract_reset() ->
+    [?erl:clause([?erl:abstract(K)], none, V)
+        || {K, V} <- [
+        {all, abstract_resetcount([input, filter, output])},
+        {input, abstract_resetcount(input)},
+        {filter, abstract_resetcount(filter)},
+        {output, abstract_resetcount(output)}
+    ]].
+
 
 %% @private Return the original query as an expression.
 abstract_query({with, _, _}) ->
@@ -329,6 +351,14 @@ abstract_getcount(Counter) ->
     [abstract_apply(gr_counter, lookup_element,
         [abstract_apply(table, [?erl:atom(counters)]),
          ?erl:abstract(Counter)])].
+
+%% @private Return an expression to reset a counter.
+-spec abstract_resetcount(atom()) -> [syntaxTree()].
+abstract_resetcount(Counter) ->
+    [abstract_apply(gr_counter, reset_counters,
+        [abstract_apply(table, [?erl:atom(counters)]),
+         ?erl:abstract(Counter)])].
+
 
 
 %% abstract code util functions

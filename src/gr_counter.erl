@@ -18,7 +18,7 @@
 
 %% API
 -export([start_link/1, 
-         check/1, check/2,
+         list/1, lookup_element/2,
          update/3]).
 
 %% gen_server callbacks
@@ -34,11 +34,11 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-check(Server) ->
-    gen_server:call(Server, check).
+list(Server) ->
+    gen_server:call(Server, list).
 
-check(Server, Counter) ->
-    gen_server:call(Server, {check, Counter}).
+lookup_element(Server, Counter) ->
+    gen_server:call(Server, {lookup_element, Counter}).
 
 update(Server, Counter, Value) ->
     gen_server:cast(Server, {update, Counter, Value}).
@@ -85,10 +85,10 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(check, _From, State) ->
+handle_call(list, _From, State) ->
     TableId = State#state.table_id,
     {reply, {ok, ets:tab2list(TableId)}, State};
-handle_call({check, Counter}, _From, State) ->
+handle_call({lookup_element, Counter}, _From, State) ->
     TableId = State#state.table_id,
     {reply, ets:lookup_element(TableId, Counter, 2), State};
 handle_call(_Request, _From, State) ->

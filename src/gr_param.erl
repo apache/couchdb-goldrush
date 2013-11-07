@@ -20,7 +20,7 @@
 -export([start_link/1, 
          list/1, size/1, insert/2, 
          lookup/2, lookup_element/2,
-         info/1, update/2, transform/1]).
+         info/1, transform/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -52,9 +52,6 @@ lookup_element(Server, Term) ->
 
 info(Server) ->
     gen_server:call(Server, info).
-
-update(Counter, Value) ->
-    gen_server:cast(?MODULE, {update, Counter, Value}).
 
 %% @doc Transform Term -> Key to Key -> Term
 transform(Server) ->
@@ -140,10 +137,6 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast({update, Counter, Value}, State) ->
-    TableId = State#state.table_id,
-    ets:update_counter(TableId, Counter, Value),
-    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 

@@ -326,7 +326,7 @@ abstract_count(Counter) ->
 %% @todo Pass state record. Only Generate code if `statistics' is enabled.
 -spec abstract_getcount(atom()) -> [syntaxTree()].
 abstract_getcount(Counter) ->
-    [abstract_apply(gr_counter, check,
+    [abstract_apply(gr_counter, lookup_element,
         [abstract_apply(table, [?erl:atom(counters)]),
          ?erl:abstract(Counter)])].
 

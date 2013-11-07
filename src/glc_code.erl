@@ -316,9 +316,8 @@ param_variable(Key) ->
 %% @todo Pass state record. Only Generate code if `statistics' is enabled.
 -spec abstract_count(atom()) -> syntaxTree().
 abstract_count(Counter) ->
-    abstract_apply(ets, update_counter,
-        [abstract_apply(table, [?erl:atom(counters)]),
-         ?erl:abstract(Counter),
+    abstract_apply(gr_counter, update,
+        [?erl:abstract(Counter),
          ?erl:abstract({2,1})]).
 
 
@@ -326,10 +325,8 @@ abstract_count(Counter) ->
 %% @todo Pass state record. Only Generate code if `statistics' is enabled.
 -spec abstract_getcount(atom()) -> [syntaxTree()].
 abstract_getcount(Counter) ->
-    [abstract_apply(ets, lookup_element,
-        [abstract_apply(table, [?erl:atom(counters)]),
-         ?erl:abstract(Counter),
-         ?erl:abstract(2)])].
+    [abstract_apply(gr_counter, check,
+        [?erl:abstract(Counter)])].
 
 
 %% abstract code util functions

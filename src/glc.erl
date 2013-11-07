@@ -200,12 +200,10 @@ module_data(Query) ->
     Params = ets:new(params, [set,protected]),
     %% query counters are stored in a shared ETS table. this should
     %% be an optional feature. enable by defaults to simplify tests.
-    Counters = ets:new(counters, [set,public]),
-    ets:insert(Counters, [{input,0}, {filter,0}, {output,0}]),
     %% the abstract_tables/1 function expects a list of name-tid pairs.
     %% tables are referred to by name in the generated code. the table/1
     %% function maps names to tids.
-    Tables = [{params,Params}, {counters,Counters}],
+    Tables = [{params,Params}],
     Query2 = glc_lib:reduce(Query),
     {ok, #module{'query'=Query, tables=Tables, qtree=Query2}}.
 
@@ -261,102 +259,131 @@ nullquery_exists_test() ->
     ?assertError(badarg, Mod:info(invalid)),
     ?assertEqual({null, false}, Mod:info('query')).
 
-init_counters_test() ->
-    {compiled, Mod} = setup_query(testmod4, glc:null(false)),
-    ?assertEqual(0, Mod:info(input)),
-    ?assertEqual(0, Mod:info(filter)),
-    ?assertEqual(0, Mod:info(output)).
-
-filtered_event_test() ->
-    %% If no selection condition is specified no inputs can match.
-    {compiled, Mod} = setup_query(testmod5, glc:null(false)),
-    glc:handle(Mod, gre:make([], [list])),
-    ?assertEqual(1, Mod:info(input)),
-    ?assertEqual(1, Mod:info(filter)),
-    ?assertEqual(0, Mod:info(output)).
-
-nomatch_event_test() ->
-    %% If a selection condition but no body is specified the event
-    %% is expected to count as filtered out if the condition does
-    %% not hold.
-    {compiled, Mod} = setup_query(testmod6, glc:eq('$n', 'noexists@nohost')),
-    glc:handle(Mod, gre:make([{'$n', 'noexists2@nohost'}], [list])),
-    ?assertEqual(1, Mod:info(input)),
-    ?assertEqual(1, Mod:info(filter)),
-    ?assertEqual(0, Mod:info(output)).
-
-opfilter_eq_test() ->
-    %% If a selection condition but no body is specified the event
-    %% counts as input to the query, but not as filtered out.
-    {compiled, Mod} = setup_query(testmod7, glc:eq('$n', 'noexists@nohost')),
-    glc:handle(Mod, gre:make([{'$n', 'noexists@nohost'}], [list])),
-    ?assertEqual(1, Mod:info(input)),
-    ?assertEqual(0, Mod:info(filter)),
-    ?assertEqual(1, Mod:info(output)),
-    done.
-
-
-opfilter_gt_test() ->
-    {compiled, Mod} = setup_query(testmod8, glc:gt(a, 1)),
-    glc:handle(Mod, gre:make([{'a', 2}], [list])),
-    ?assertEqual(1, Mod:info(input)),
-    ?assertEqual(0, Mod:info(filter)),
-    glc:handle(Mod, gre:make([{'a', 0}], [list])),
-    ?assertEqual(2, Mod:info(input)),
-    ?assertEqual(1, Mod:info(filter)),
-    ?assertEqual(1, Mod:info(output)),
-    done.
-
-opfilter_lt_test() ->
-    {compiled, Mod} = setup_query(testmod9, glc:lt(a, 1)),
-    glc:handle(Mod, gre:make([{'a', 0}], [list])),
-    ?assertEqual(1, Mod:info(input)),
-    ?assertEqual(0, Mod:info(filter)),
-    ?assertEqual(1, Mod:info(output)),
-    glc:handle(Mod, gre:make([{'a', 2}], [list])),
-    ?assertEqual(2, Mod:info(input)),
-    ?assertEqual(1, Mod:info(filter)),
-    ?assertEqual(1, Mod:info(output)),
-    done.
-
-allholds_op_test() ->
-    {compiled, Mod} = setup_query(testmod10,
-        glc:all([glc:eq(a, 1), glc:eq(b, 2)])),
-    glc:handle(Mod, gre:make([{'a', 1}], [list])),
-    glc:handle(Mod, gre:make([{'a', 2}], [list])),
-    ?assertEqual(2, Mod:info(input)),
-    ?assertEqual(2, Mod:info(filter)),
-    glc:handle(Mod, gre:make([{'b', 1}], [list])),
-    glc:handle(Mod, gre:make([{'b', 2}], [list])),
-    ?assertEqual(4, Mod:info(input)),
-    ?assertEqual(4, Mod:info(filter)),
-    glc:handle(Mod, gre:make([{'a', 1},{'b', 2}], [list])),
-    ?assertEqual(5, Mod:info(input)),
-    ?assertEqual(4, Mod:info(filter)),
-    ?assertEqual(1, Mod:info(output)),
-    done.
-
-anyholds_op_test() ->
-    {compiled, Mod} = setup_query(testmod11,
-        glc:any([glc:eq(a, 1), glc:eq(b, 2)])),
-    glc:handle(Mod, gre:make([{'a', 2}], [list])),
-    glc:handle(Mod, gre:make([{'b', 1}], [list])),
-    ?assertEqual(2, Mod:info(input)),
-    ?assertEqual(2, Mod:info(filter)),
-    glc:handle(Mod, gre:make([{'a', 1}], [list])),
-    glc:handle(Mod, gre:make([{'b', 2}], [list])),
-    ?assertEqual(4, Mod:info(input)),
-    ?assertEqual(2, Mod:info(filter)),
-    done.
-
-with_function_test() ->
-    Self = self(),
-    {compiled, Mod} = setup_query(testmod12,
-        glc:with(glc:eq(a, 1), fun(Event) -> Self ! gre:fetch(a, Event) end)),
-    glc:handle(Mod, gre:make([{a,1}], [list])),
-    ?assertEqual(1, Mod:info(output)),
-    ?assertEqual(1, receive Msg -> Msg after 0 -> notcalled end),
-    done.
+events_test_() ->
+    {foreach,
+        fun() ->
+                error_logger:tty(false),
+                application:start(syntax_tools),
+                application:start(compiler),
+                application:start(goldrush)
+        end,
+        fun(_) ->
+                application:stop(goldrush),
+                application:stop(compiler),
+                application:stop(syntax_tools),
+                error_logger:tty(true)
+        end,
+        [
+            {"init counters test",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod4, glc:null(false)),
+                    ?assertEqual(0, Mod:info(input)),
+                    ?assertEqual(0, Mod:info(filter)),
+                    ?assertEqual(0, Mod:info(output))
+                end
+            },
+            {"filtered events test",
+                fun() ->
+                    %% If no selection condition is specified no inputs can match.
+                    {compiled, Mod} = setup_query(testmod5, glc:null(false)),
+                    glc:handle(Mod, gre:make([], [list])),
+                    ?assertEqual(1, Mod:info(input)),
+                    ?assertEqual(1, Mod:info(filter)),
+                    ?assertEqual(0, Mod:info(output))
+                end
+            },
+            {"nomatch event test",
+                fun() ->
+                    %% If a selection condition but no body is specified the event
+                    %% is expected to count as filtered out if the condition does
+                    %% not hold.
+                    {compiled, Mod} = setup_query(testmod6, glc:eq('$n', 'noexists@nohost')),
+                    glc:handle(Mod, gre:make([{'$n', 'noexists2@nohost'}], [list])),
+                    ?assertEqual(1, Mod:info(input)),
+                    ?assertEqual(1, Mod:info(filter)),
+                    ?assertEqual(0, Mod:info(output))
+                end
+            },
+            {"opfilter equal test",
+                fun() ->
+                    %% If a selection condition but no body is specified the event
+                    %% counts as input to the query, but not as filtered out.
+                    {compiled, Mod} = setup_query(testmod7, glc:eq('$n', 'noexists@nohost')),
+                    glc:handle(Mod, gre:make([{'$n', 'noexists@nohost'}], [list])),
+                    ?assertEqual(1, Mod:info(input)),
+                    ?assertEqual(0, Mod:info(filter)),
+                    ?assertEqual(1, Mod:info(output))
+                end
+            },
+            {"opfilter greater than test",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod8, glc:gt(a, 1)),
+                    glc:handle(Mod, gre:make([{'a', 2}], [list])),
+                    ?assertEqual(1, Mod:info(input)),
+                    ?assertEqual(0, Mod:info(filter)),
+                    glc:handle(Mod, gre:make([{'a', 0}], [list])),
+                    ?assertEqual(2, Mod:info(input)),
+                    ?assertEqual(1, Mod:info(filter)),
+                    ?assertEqual(1, Mod:info(output))
+                end
+            },
+            {"opfilter less than test",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod9, glc:lt(a, 1)),
+                    glc:handle(Mod, gre:make([{'a', 0}], [list])),
+                    ?assertEqual(1, Mod:info(input)),
+                    ?assertEqual(0, Mod:info(filter)),
+                    ?assertEqual(1, Mod:info(output)),
+                    glc:handle(Mod, gre:make([{'a', 2}], [list])),
+                    ?assertEqual(2, Mod:info(input)),
+                    ?assertEqual(1, Mod:info(filter)),
+                    ?assertEqual(1, Mod:info(output))
+                end
+            },
+            {"allholds op test",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod10,
+                        glc:all([glc:eq(a, 1), glc:eq(b, 2)])),
+                    glc:handle(Mod, gre:make([{'a', 1}], [list])),
+                    glc:handle(Mod, gre:make([{'a', 2}], [list])),
+                    ?assertEqual(2, Mod:info(input)),
+                    ?assertEqual(2, Mod:info(filter)),
+                    glc:handle(Mod, gre:make([{'b', 1}], [list])),
+                    glc:handle(Mod, gre:make([{'b', 2}], [list])),
+                    ?assertEqual(4, Mod:info(input)),
+                    ?assertEqual(4, Mod:info(filter)),
+                    glc:handle(Mod, gre:make([{'a', 1},{'b', 2}], [list])),
+                    ?assertEqual(5, Mod:info(input)),
+                    ?assertEqual(4, Mod:info(filter)),
+                    ?assertEqual(1, Mod:info(output))
+                end
+            },
+            {"anyholds op test",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod11,
+                        glc:any([glc:eq(a, 1), glc:eq(b, 2)])),
+                    glc:handle(Mod, gre:make([{'a', 2}], [list])),
+                    glc:handle(Mod, gre:make([{'b', 1}], [list])),
+                    ?assertEqual(2, Mod:info(input)),
+                    ?assertEqual(2, Mod:info(filter)),
+                    glc:handle(Mod, gre:make([{'a', 1}], [list])),
+                    glc:handle(Mod, gre:make([{'b', 2}], [list])),
+                    ?assertEqual(4, Mod:info(input)),
+                    ?assertEqual(2, Mod:info(filter))
+                end
+            },
+            {"with function test",
+                fun() ->
+                    Self = self(),
+                    {compiled, Mod} = setup_query(testmod12,
+                        glc:with(glc:eq(a, 1), fun(Event) -> Self ! gre:fetch(a, Event) end)),
+                    glc:handle(Mod, gre:make([{a,1}], [list])),
+                    ?assertEqual(1, Mod:info(output)),
+                    ?assertEqual(1, receive Msg -> Msg after 0 -> notcalled end)
+                end
+            }
+        ]
+    }.
 
 union_error_test() ->
     ?assertError(badarg, glc:union([glc:eq(a, 1)])),

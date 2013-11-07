@@ -12,14 +12,12 @@
 %% ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 %% OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
--module(gr_counter).
+-module(gr_manager).
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, 
-         check/1, check/2,
-         update/3]).
+-export([start_link/3]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -29,19 +27,16 @@
          terminate/2,
          code_change/3]).
 
--record(state, {init=true, table_id}).
+-define(SERVER, ?MODULE).
+
+-record(state, {table_id :: ets:tid(), managee :: atom()}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-check(Server) ->
-    gen_server:call(Server, check).
 
-check(Server, Counter) ->
-    gen_server:call(Server, {check, Counter}).
-
-update(Server, Counter, Value) ->
-    gen_server:cast(Server, {update, Counter, Value}).
+setup(Name, Data) ->
+    gen_server:cast(Name, {setup, Data}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -50,8 +45,8 @@ update(Server, Counter, Value) ->
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(Name) ->
-    gen_server:start_link({local, Name}, ?MODULE, [], []).
+start_link(Name, Managee, Data) ->
+    gen_server:start_link({local, Name}, ?MODULE, [Managee, Data], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -68,8 +63,10 @@ start_link(Name) ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([]) ->
-    {ok, #state{}}.
+init([Managee, Data]) ->
+    process_flag(trap_exit, true),
+    setup(self(), Data),
+    {ok, #state{managee=Managee}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -85,12 +82,6 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(check, _From, State) ->
-    TableId = State#state.table_id,
-    {reply, {ok, ets:tab2list(TableId)}, State};
-handle_call({check, Counter}, _From, State) ->
-    TableId = State#state.table_id,
-    {reply, ets:lookup_element(TableId, Counter, 2), State};
 handle_call(_Request, _From, State) ->
     Reply = {error, unhandled_message},
     {reply, Reply, State}.
@@ -105,10 +96,14 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast({update, Counter, Value}, State) ->
-    TableId = State#state.table_id,
-    ets:update_counter(TableId, Counter, Value),
-    {noreply, State};
+handle_cast({setup, Data}, State = #state{managee=Managee}) ->
+    ManageePid = whereis(Managee),
+    link(ManageePid),
+    TableId = ets:new(?MODULE, [set, private]),
+    ets:insert(TableId, Data),
+    ets:setopts(TableId, {heir, self(), Data}),
+    ets:give_away(TableId, ManageePid, Data),
+    {noreply, State#state{table_id=TableId}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -122,10 +117,23 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({'ETS-TRANSFER', TableId, _Pid, _Data}, State) ->
-    {noreply, State#state{table_id=TableId}};
-handle_info(_Info, State) ->
-    {noreply, State}.
+handle_info({'EXIT', _Pid, _Reason}, State) ->
+    {noreply, State};
+handle_info({'ETS-TRANSFER', TableId, _Pid, Data}, State = #state{managee=Managee}) ->
+    ManageePid = wait_for_pid(Managee),
+    link(ManageePid),
+    ets:give_away(TableId, ManageePid, Data),
+    {noreply, State#state{table_id=TableId}}.
+
+wait_for_pid(Managee) -> 
+    case whereis(Managee) of
+        undefined -> 
+            timer:sleep(1),
+            wait_for_pid(Managee);
+        Pid -> Pid
+    end.
+
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -155,5 +163,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
 
 

@@ -12,12 +12,15 @@
 %% ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 %% OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
--module(gr_counter_mgr).
+-module(gr_param).
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/1, 
+         list/1, size/1, insert/2, 
+         lookup/2, lookup_element/2,
+         info/1, update/2, transform/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -27,18 +30,35 @@
          terminate/2,
          code_change/3]).
 
--define(SERVER, ?MODULE).
-
--record(state, {table_id}).
-
--define(CTR, gr_counter).
+-record(state, {init=true, table_id}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+list(Server) ->
+    gen_server:call(Server, list).
 
-setup(Data) ->
-    gen_server:cast(?MODULE, {setup, Data}).
+size(Server) ->
+    gen_server:call(Server, size).
+
+insert(Server, Data) ->
+    gen_server:call(Server, {insert, Data}).
+
+lookup(Server, Term) ->
+    gen_server:call(Server, {lookup, Term}).
+
+lookup_element(Server, Term) ->
+    gen_server:call(Server, {lookup_element, Term}).
+
+info(Server) ->
+    gen_server:call(Server, info).
+
+update(Counter, Value) ->
+    gen_server:cast(?MODULE, {update, Counter, Value}).
+
+%% @doc Transform Term -> Key to Key -> Term
+transform(Server) ->
+    gen_server:call(Server, transform).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -47,8 +67,8 @@ setup(Data) ->
 %% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link(Name) ->
+    gen_server:start_link({local, Name}, ?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -66,8 +86,6 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
-    process_flag(trap_exit, true),
-    setup([{input,0}, {filter,0}, {output,0}]),
     {ok, #state{}}.
 
 %%--------------------------------------------------------------------
@@ -84,8 +102,32 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_call(list, _From, State) ->
+    TableId = State#state.table_id,
+    {reply, ets:tab2list(TableId), State};
+handle_call(size, _From, State) ->
+    TableId = State#state.table_id,
+    {reply, ets:info(TableId, size), State};
+handle_call({insert, Data}, _From, State) ->
+    TableId = State#state.table_id,
+    {reply, ets:insert(TableId, Data), State};
+handle_call({lookup, Term}, _From, State) ->
+    TableId = State#state.table_id,
+    {reply, ets:lookup(TableId, Term), State};
+handle_call({lookup_element, Term}, _From, State) ->
+    TableId = State#state.table_id,
+    {reply, ets:lookup_element(TableId, Term, 2), State};
+handle_call(info, _From, State) ->
+    TableId = State#state.table_id,
+    {reply, ets:info(TableId), State};
+handle_call(transform, _From, State) ->
+    TableId = State#state.table_id,
+    ParamsList = [{K, V} || {V, K} <- ets:tab2list(TableId)],
+    ets:delete_all_objects(TableId),
+    ets:insert(TableId, ParamsList),
+    {reply, ok, State};
 handle_call(_Request, _From, State) ->
-    Reply = ok,
+    Reply = {error, unhandled_message},
     {reply, Reply, State}.
 
 %%--------------------------------------------------------------------
@@ -98,14 +140,10 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast({setup, Data}, State) ->
-    Ctr = whereis(?CTR),
-    link(Ctr),
-    TableId = ets:new(?MODULE, [set, private]),
-    ets:insert(TableId, Data),
-    ets:setopts(TableId, {heir, self(), Data}),
-    ets:give_away(TableId, Ctr, Data),
-    {noreply, State#state{table_id=TableId}};
+handle_cast({update, Counter, Value}, State) ->
+    TableId = State#state.table_id,
+    ets:update_counter(TableId, Counter, Value),
+    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -119,23 +157,10 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info({'EXIT', _Pid, killed}, State) ->
-    {noreply, State};
-handle_info({'ETS-TRANSFER', TableId, _Pid, Data}, State) ->
-    Ctr = wait_for_ctr(),
-    link(Ctr),
-    ets:give_away(TableId, Ctr, Data),
-    {noreply, State#state{table_id=TableId}}.
-
-wait_for_ctr() -> 
-    case whereis(?CTR) of
-        undefined -> 
-            timer:sleep(1),
-            wait_for_ctr();
-        Pid -> Pid
-    end.
-
-
+handle_info({'ETS-TRANSFER', TableId, _Pid, _Data}, State) ->
+    {noreply, State#state{table_id=TableId}};
+handle_info(_Info, State) ->
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -165,6 +190,5 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
 
 

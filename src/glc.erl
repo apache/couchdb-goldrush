@@ -87,7 +87,7 @@
 
 -record(module, {
     'query' :: term(),
-    tables :: [{atom(), ets:tid()}],
+    tables :: [{atom(), atom()}],
     qtree :: term()
 }).
 
@@ -167,7 +167,7 @@ union(Queries) ->
 %% function. The name of the query module is expected to be unique.
 -spec compile(atom(), list()) -> {ok, atom()}.
 compile(Module, Query) ->
-    {ok, ModuleData} = module_data(Query),
+    {ok, ModuleData} = module_data(Module, Query),
     case glc_code:compile(Module, ModuleData) of
         {ok, Module} ->
             {ok, Module}
@@ -186,26 +186,72 @@ handle(Module, Event) ->
 %% is expected to be associated with an existing query module. Calling this
 %% function will result in a runtime error.
 -spec delete(atom()) -> ok.
-delete(_Module) ->
+delete(Module) ->
+    Params = params_name(Module),
+    Counts = counts_name(Module),
+    ManageParams = manage_params_name(Module),
+    ManageCounts = manage_counts_name(Module),
+
+    [ begin 
+        supervisor:terminate_child(Sup, Name),
+        supervisor:delete_child(Sup, Name)
+      end || {Sup, Name} <- 
+        [{gr_manager_sup, ManageParams}, {gr_manager_sup, ManageCounts},
+         {gr_param_sup, Params}, {gr_counter_sup, Counts}]
+    ],
+
+    code:soft_purge(Module),
+    code:delete(Module),
     ok.
 
 
 %% @private Map a query to a module data term.
--spec module_data(term()) -> {ok, #module{}}.
-module_data(Query) ->
+-spec module_data(atom(), term()) -> {ok, #module{}}.
+module_data(Module, Query) ->
     %% terms in the query which are not valid arguments to the
     %% erl_syntax:abstract/1 functions are stored in ETS.
     %% the terms are only looked up once they are necessary to
     %% continue evaluation of the query.
-    Params = ets:new(params, [set,protected]),
+
     %% query counters are stored in a shared ETS table. this should
-    %% be an optional feature. enable by defaults to simplify tests.
-    %% the abstract_tables/1 function expects a list of name-tid pairs.
+    %% be an optional feature. enabled by defaults to simplify tests.
+    %% the abstract_tables/1 function expects a list of name-atom pairs.
     %% tables are referred to by name in the generated code. the table/1
-    %% function maps names to tids.
-    Tables = [{params,Params}],
+    %% function maps names to registered processes response for those tables.
+    Tables = module_tables(Module),
     Query2 = glc_lib:reduce(Query),
     {ok, #module{'query'=Query, tables=Tables, qtree=Query2}}.
+
+%% @private Create a data managed supervised process for params, counter tables
+module_tables(Module) ->
+    Params = params_name(Module),
+    Counts = counts_name(Module),
+    ManageParams = manage_params_name(Module),
+    ManageCounts = manage_counts_name(Module),
+    Counters = [{input,0}, {filter,0}, {output,0}],
+
+    supervisor:start_child(gr_param_sup, 
+        {Params, {gr_param, start_link, [Params]}, 
+        transient, brutal_kill, worker, [Params]}),
+    supervisor:start_child(gr_counter_sup, 
+        {Counts, {gr_counter, start_link, [Counts]}, 
+        transient, brutal_kill, worker, [Counts]}),
+    supervisor:start_child(gr_manager_sup, 
+        {ManageParams, {gr_manager, start_link, [ManageParams, Params, []]},
+        transient, brutal_kill, worker, [ManageParams]}),
+    supervisor:start_child(gr_manager_sup, {ManageCounts, 
+        {gr_manager, start_link, [ManageCounts, Counts, Counters]},
+        transient, brutal_kill, worker, [ManageCounts]}),
+    [{params,Params}, {counters, Counts}].
+
+reg_name(Module, Name) ->
+    list_to_atom("gr_" ++ atom_to_list(Module) ++ Name).
+
+params_name(Module) -> reg_name(Module, "_params").
+counts_name(Module) -> reg_name(Module, "_counters").
+manage_params_name(Module) -> reg_name(Module, "_params_mgr").
+manage_counts_name(Module) -> reg_name(Module, "_counters_mgr").
+
 
 
 %% @todo Move comment.
@@ -244,21 +290,6 @@ setup_query(Module, Query) ->
     ?assert(erlang:function_exported(Module, handle, 1)),
     {compiled, Module}.
 
-nullquery_compiles_test() ->
-    {compiled, Mod} = setup_query(testmod1, glc:null(false)),
-    ?assertError(badarg, Mod:table(noexists)).
-
-params_table_exists_test() ->
-    {compiled, Mod} = setup_query(testmod2, glc:null(false)),
-    ?assert(is_integer(Mod:table(params))),
-    ?assertMatch([_|_], ets:info(Mod:table(params))).
-
-nullquery_exists_test() ->
-    {compiled, Mod} = setup_query(testmod3, glc:null(false)),
-    ?assert(erlang:function_exported(Mod, info, 1)),
-    ?assertError(badarg, Mod:info(invalid)),
-    ?assertEqual({null, false}, Mod:info('query')).
-
 events_test_() ->
     {foreach,
         fun() ->
@@ -274,6 +305,27 @@ events_test_() ->
                 error_logger:tty(true)
         end,
         [
+            {"null query compiles",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod1, glc:null(false)),
+                    ?assertError(badarg, Mod:table(noexists))
+                end
+            },
+            {"params table exists",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod2, glc:null(false)),
+                    ?assert(is_atom(Mod:table(params))),
+                    ?assertMatch([_|_], gr_param:info(Mod:table(params)))
+                end
+            },
+            {"null query exists",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod3, glc:null(false)),
+                    ?assert(erlang:function_exported(Mod, info, 1)),
+                    ?assertError(badarg, Mod:info(invalid)),
+                    ?assertEqual({null, false}, Mod:info('query'))
+                end
+            },
             {"init counters test",
                 fun() ->
                     {compiled, Mod} = setup_query(testmod4, glc:null(false)),
@@ -380,6 +432,26 @@ events_test_() ->
                     glc:handle(Mod, gre:make([{a,1}], [list])),
                     ?assertEqual(1, Mod:info(output)),
                     ?assertEqual(1, receive Msg -> Msg after 0 -> notcalled end)
+                end
+            },
+            {"delete test",
+                fun() ->
+                    {compiled, Mod} = setup_query(testmod13, glc:null(false)),
+                    ?assert(is_atom(Mod:table(params))),
+                    ?assertMatch([_|_], gr_param:info(Mod:table(params))),
+                    ?assert(is_list(code:which(Mod))),
+                    ?assert(is_pid(whereis(params_name(Mod)))),
+                    ?assert(is_pid(whereis(counts_name(Mod)))),
+                    ?assert(is_pid(whereis(manage_params_name(Mod)))),
+                    ?assert(is_pid(whereis(manage_counts_name(Mod)))),
+
+                    glc:delete(Mod),
+                    
+                    ?assertEqual(non_existing, code:which(Mod)),
+                    ?assertEqual(undefined, whereis(params_name(Mod))),
+                    ?assertEqual(undefined, whereis(counts_name(Mod))),
+                    ?assertEqual(undefined, whereis(manage_params_name(Mod))),
+                    ?assertEqual(undefined, whereis(manage_counts_name(Mod)))
                 end
             }
         ]

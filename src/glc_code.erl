@@ -9,7 +9,7 @@
 
 -record(module, {
     'query' :: term(),
-    tables :: [{atom(), ets:tid()}],
+    tables :: [{atom(), atom()}],
     qtree :: term()
 }).
 
@@ -20,7 +20,8 @@
     fields = [] :: [{atom(), syntaxTree()}],
     fieldc = 0 :: non_neg_integer(),
     paramvars = [] :: [{term(), syntaxTree()}],
-    paramstab = undefined :: ets:tid()
+    paramstab = undefined :: atom(),
+    countstab = undefined :: atom()
 }).
 
 -type nextFun() :: fun((#state{}) -> [syntaxTree()]).
@@ -47,6 +48,7 @@ abstract_module(Module, Data) ->
 -spec abstract_module_(atom(), #module{}) -> [?erl:syntaxTree()].
 abstract_module_(Module, #module{tables=Tables, qtree=Tree}=Data) ->
     {_, ParamsTable} = lists:keyfind(params, 1, Tables),
+    {_, CountsTable} = lists:keyfind(counters, 1, Tables),
     AbstractMod = [
      %% -module(Module)
      ?erl:attribute(?erl:atom(module), [?erl:atom(Module)]),
@@ -94,12 +96,11 @@ abstract_module_(Module, #module{tables=Tables, qtree=Tree}=Data) ->
         [?erl:clause([?erl:variable("Event")], none,
          abstract_filter(Tree, #state{
             event=?erl:variable("Event"),
-            paramstab=ParamsTable}))])
+            paramstab=ParamsTable,
+            countstab=CountsTable}))])
     ],
     %% Transform Term -> Key to Key -> Term
-    ParamsList = [{K, V} || {V, K} <- ets:tab2list(ParamsTable)],
-    ets:delete_all_objects(ParamsTable),
-    ets:insert(ParamsTable, ParamsList),
+    gr_param:transform(ParamsTable),
     AbstractMod.
 
 %% @private Return the clauses of the table/1 function.
@@ -258,22 +259,21 @@ abstract_getparam(Term, OnBound, #state{paramvars=Params}=State) ->
 
 
 -spec abstract_getparam_(term(), nextFun(), #state{}) -> [syntaxTree()].
-abstract_getparam_(Term, OnBound, #state{paramstab=Table,
+abstract_getparam_(Term, OnBound, #state{paramstab=ParamsTable,
         paramvars=Params}=State) ->
-    Key = case ets:lookup(Table, Term) of
+    Key = case gr_param:lookup(ParamsTable, Term) of
         [{_, Key2}] ->
             Key2;
         [] ->
-            Key2 = ets:info(Table, size),
-            ets:insert(Table, {Term, Key2}),
+            Key2 = gr_param:size(ParamsTable),
+            gr_param:insert(ParamsTable, {Term, Key2}),
             Key2
     end,
     [?erl:match_expr(
         param_variable(Key),
-        abstract_apply(ets, lookup_element,
+        abstract_apply(gr_param, lookup_element,
             [abstract_apply(table, [?erl:atom(params)]),
-             ?erl:abstract(Key),
-             ?erl:abstract(2)]))
+             ?erl:abstract(Key)]))
     ] ++ OnBound(State#state{paramvars=[{Term, param_variable(Key)}|Params]}).
 
 %% @private Generate a variable name for the value of a field.
@@ -317,7 +317,8 @@ param_variable(Key) ->
 -spec abstract_count(atom()) -> syntaxTree().
 abstract_count(Counter) ->
     abstract_apply(gr_counter, update,
-        [?erl:abstract(Counter),
+        [abstract_apply(table, [?erl:atom(counters)]),
+         ?erl:abstract(Counter),
          ?erl:abstract({2,1})]).
 
 
@@ -326,7 +327,8 @@ abstract_count(Counter) ->
 -spec abstract_getcount(atom()) -> [syntaxTree()].
 abstract_getcount(Counter) ->
     [abstract_apply(gr_counter, check,
-        [?erl:abstract(Counter)])].
+        [abstract_apply(table, [?erl:atom(counters)]),
+         ?erl:abstract(Counter)])].
 
 
 %% abstract code util functions

@@ -496,6 +496,26 @@ events_test_() ->
                     ?assertEqual(0, Mod:info(filter)),
                     ?assertEqual(0, Mod:info(output))
                 end
+            },
+            {"ets data recovery test",
+                fun() ->
+                    Self = self(),
+                    {compiled, Mod} = setup_query(testmod15,
+                        glc:with(glc:eq(a, 1), fun(Event) -> Self ! gre:fetch(a, Event) end)),
+                    glc:handle(Mod, gre:make([{a,1}], [list])),
+                    ?assertEqual(1, Mod:info(output)),
+                    ?assertEqual(1, receive Msg -> Msg after 0 -> notcalled end),
+                    ?assertEqual(1, length(gr_param:list(Mod:table(params)))),
+                    ?assertEqual(3, length(gr_param:list(Mod:table(counters)))),
+                    true = exit(whereis(Mod:table(params)), kill),
+                    true = exit(whereis(Mod:table(counters)), kill),
+                    ?assertEqual(1, Mod:info(input)),
+                    glc:handle(Mod, gre:make([{'a', 1}], [list])),
+                    ?assertEqual(2, Mod:info(input)),
+                    ?assertEqual(2, Mod:info(output)),
+                    ?assertEqual(1, length(gr_param:list(Mod:table(params)))),
+                    ?assertEqual(3, length(gr_counter:list(Mod:table(counters))))
+                end
             }
         ]
     }.

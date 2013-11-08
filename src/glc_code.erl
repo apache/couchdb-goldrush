@@ -287,7 +287,7 @@ abstract_getparam_(Term, OnBound, #state{paramstab=ParamsTable,
         [{_, Key2}] ->
             Key2;
         [] ->
-            Key2 = gr_param:size(ParamsTable),
+            Key2 = gr_param:info_size(ParamsTable),
             gr_param:insert(ParamsTable, {Term, Key2}),
             Key2
     end,
@@ -338,7 +338,7 @@ param_variable(Key) ->
 %% @todo Pass state record. Only Generate code if `statistics' is enabled.
 -spec abstract_count(atom()) -> syntaxTree().
 abstract_count(Counter) ->
-    abstract_apply(gr_counter, update,
+    abstract_apply(gr_counter, update_counter,
         [abstract_apply(table, [?erl:atom(counters)]),
          ?erl:abstract(Counter),
          ?erl:abstract({2,1})]).

@@ -18,9 +18,9 @@
 
 %% API
 -export([start_link/1, 
-         list/1, size/1, insert/2, 
+         list/1, insert/2, 
          lookup/2, lookup_element/2,
-         info/1, transform/1]).
+         info/1, info_size/1, transform/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -30,32 +30,60 @@
          terminate/2,
          code_change/3]).
 
--record(state, {init=true, table_id}).
+-record(state, {table_id, waiting=[]}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 list(Server) ->
-    gen_server:call(Server, list).
+    case (catch gen_server:call(Server, list)) of
+        {'EXIT', _Reason} ->
+            list(gr_manager:wait_for_pid(Server));
+        Else -> Else
+    end.
 
-size(Server) ->
-    gen_server:call(Server, size).
+info_size(Server) ->
+    case (catch gen_server:call(Server, info_size)) of
+        {'EXIT', _Reason} ->
+            info_size(gr_manager:wait_for_pid(Server));
+        Else -> Else
+    end.
 
-insert(Server, Data) ->
-    gen_server:call(Server, {insert, Data}).
+insert(Server, Term) ->
+    case (catch gen_server:call(Server, {insert, Term})) of
+        {'EXIT', _Reason} ->
+            insert(gr_manager:wait_for_pid(Server), Term);
+        Else -> Else
+    end.
 
 lookup(Server, Term) ->
-    gen_server:call(Server, {lookup, Term}).
+    case (catch gen_server:call(Server, {lookup, Term})) of
+        {'EXIT', _Reason} ->
+            lookup(gr_manager:wait_for_pid(Server), Term);
+        Else -> Else
+    end.
 
 lookup_element(Server, Term) ->
-    gen_server:call(Server, {lookup_element, Term}).
+    case (catch gen_server:call(Server, {lookup_element, Term})) of
+        {'EXIT', _Reason} ->
+            lookup_element(gr_manager:wait_for_pid(Server), Term);
+        Else -> Else
+    end.
 
 info(Server) ->
-    gen_server:call(Server, info).
+    case (catch gen_server:call(Server, info)) of
+        {'EXIT', _Reason} ->
+            info(gr_manager:wait_for_pid(Server));
+        Else -> Else
+    end.
 
 %% @doc Transform Term -> Key to Key -> Term
 transform(Server) ->
-    gen_server:call(Server, transform).
+    case (catch gen_server:call(Server, transform)) of
+        {'EXIT', _Reason} ->
+            transform(gr_manager:wait_for_pid(Server));
+        Else -> Else
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -99,30 +127,39 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(list, _From, State) ->
+handle_call(Call, From, State) when is_atom(Call), Call =:= list; 
+                                     Call =:= info; Call =:= info_size;
+                                     Call =:= transform ->
     TableId = State#state.table_id,
-    {reply, ets:tab2list(TableId), State};
-handle_call(size, _From, State) ->
+    Waiting = State#state.waiting,
+    case TableId of
+        undefined -> {noreply, State#state{waiting=[{Call, From}|Waiting]}};
+        _ when Call =:= list -> 
+            {reply, handle_list(TableId), State};
+        _ when Call =:= info -> 
+            {reply, handle_info(TableId), State};
+        _ when Call =:= info_size -> 
+            {reply, handle_info_size(TableId), State};
+        _ when Call =:= transform -> 
+            {reply, handle_transform(TableId), State}
+    end;
+
+handle_call({Call, Term}, From, State) when is_atom(Call), Call =:= insert; 
+                                              Call =:= lookup; 
+                                              Call =:= lookup_element ->
     TableId = State#state.table_id,
-    {reply, ets:info(TableId, size), State};
-handle_call({insert, Data}, _From, State) ->
-    TableId = State#state.table_id,
-    {reply, ets:insert(TableId, Data), State};
-handle_call({lookup, Term}, _From, State) ->
-    TableId = State#state.table_id,
-    {reply, ets:lookup(TableId, Term), State};
-handle_call({lookup_element, Term}, _From, State) ->
-    TableId = State#state.table_id,
-    {reply, ets:lookup_element(TableId, Term, 2), State};
-handle_call(info, _From, State) ->
-    TableId = State#state.table_id,
-    {reply, ets:info(TableId), State};
-handle_call(transform, _From, State) ->
-    TableId = State#state.table_id,
-    ParamsList = [{K, V} || {V, K} <- ets:tab2list(TableId)],
-    ets:delete_all_objects(TableId),
-    ets:insert(TableId, ParamsList),
-    {reply, ok, State};
+    Waiting = State#state.waiting,
+    case TableId of
+        undefined -> 
+            {noreply, State#state{waiting=[{{Call, Term}, From}|Waiting]}};
+        _ when Call =:= insert -> 
+            {reply, handle_insert(TableId, Term), State};
+        _ when Call =:= lookup -> 
+            {reply, handle_lookup(TableId, Term), State};
+        _ when Call =:= lookup_element -> 
+            {reply, handle_lookup_element(TableId, Term), State}
+    end;
+
 handle_call(_Request, _From, State) ->
     Reply = {error, unhandled_message},
     {reply, Reply, State}.
@@ -151,9 +188,13 @@ handle_cast(_Msg, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_info({'ETS-TRANSFER', TableId, _Pid, _Data}, State) ->
-    {noreply, State#state{table_id=TableId}};
+    [ gen_server:reply(From, perform_call(TableId, Call)) 
+      || {Call, From} <- State#state.waiting ],
+    {noreply, State#state{table_id=TableId, waiting=[]}};
 handle_info(_Info, State) ->
     {noreply, State}.
+
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -184,4 +225,45 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+perform_call(TableId, Call) ->
+    case Call of
+        list ->
+            handle_list(TableId);
+        info ->
+            handle_info(TableId);
+        info_size ->
+            handle_info_size(TableId);
+        transform ->
+            handle_transform(TableId);
+        {insert, Term} ->
+            handle_insert(TableId, Term);
+        {lookup, Term} ->
+            handle_lookup(TableId, Term);
+        {lookup_element, Term} ->
+            handle_lookup_element(TableId, Term)
+    end.
+
+
+handle_list(TableId) ->
+    ets:tab2list(TableId).
+
+handle_info(TableId) ->
+    ets:info(TableId).
+
+handle_info_size(TableId) ->
+    ets:info(TableId, size).
+
+handle_transform(TableId) ->
+    ParamsList = [{K, V} || {V, K} <- ets:tab2list(TableId)],
+    ets:delete_all_objects(TableId),
+    ets:insert(TableId, ParamsList).
+
+handle_insert(TableId, Term) ->
+    ets:insert(TableId, Term).
+
+handle_lookup(TableId, Term) ->
+    ets:lookup(TableId, Term).
+
+handle_lookup_element(TableId, Term) ->
+    ets:lookup_element(TableId, Term, 2).
 

@@ -19,7 +19,7 @@
 %% API
 -export([start_link/1, 
          list/1, lookup_element/2,
-         update/3, reset_counters/2]).
+         update_counter/3, reset_counters/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -29,22 +29,47 @@
          terminate/2,
          code_change/3]).
 
--record(state, {init=true, table_id}).
+-record(state, {table_id, waiting=[]}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 list(Server) ->
-    gen_server:call(Server, list).
+    case (catch gen_server:call(Server, list)) of
+        {'EXIT', _Reason} ->
+            list(gr_manager:wait_for_pid(Server));
+        Else -> Else
+    end.
 
-lookup_element(Server, Counter) ->
-    gen_server:call(Server, {lookup_element, Counter}).
+lookup_element(Server, Term) ->
+    case (catch gen_server:call(Server, {lookup_element, Term})) of
+        {'EXIT', _Reason} ->
+            lookup_element(gr_manager:wait_for_pid(Server), Term);
+        Else -> Else
+    end.
 
-update(Server, Counter, Value) ->
+update_counter(Server, Counter, Value) when is_atom(Server) ->
+    case whereis(Server) of
+        undefined -> 
+            update_counter(gr_manager:wait_for_pid(Server), Counter, Value);
+        Pid -> 
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    update_counter(Pid, Counter, Value);
+                false ->
+                    ServerPid = gr_manager:wait_for_pid(Server),
+                    update_counter(ServerPid, Counter, Value)
+            end
+    end;
+update_counter(Server, Counter, Value) when is_pid(Server) ->
     gen_server:cast(Server, {update, Counter, Value}).
 
 reset_counters(Server, Counter) ->
-    gen_server:call(Server, {reset_counters, Counter}).
+    case (catch gen_server:call(Server, {reset_counters, Counter})) of
+        {'EXIT', _Reason} ->
+            reset_counters(gr_manager:wait_for_pid(Server), Counter);
+        Else -> Else
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -88,21 +113,34 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(list, _From, State) ->
+handle_call(list=Call, From, State) ->
     TableId = State#state.table_id,
-    {reply, {ok, ets:tab2list(TableId)}, State};
-handle_call({lookup_element, Counter}, _From, State) ->
+    Waiting = State#state.waiting,
+    case TableId of
+        undefined -> {noreply, State#state{waiting=[{Call, From}|Waiting]}};
+        _ -> {reply, handle_list(TableId), State}
+    end;
+handle_call({lookup_element, Term}=Call, From, State) ->
     TableId = State#state.table_id,
-    {reply, ets:lookup_element(TableId, Counter, 2), State};
-handle_call({reset_counters, Counter}, _From, State) ->
-    TableId = State#state.table_id,
-    Reset = case Counter of
+    Waiting = State#state.waiting,
+    case TableId of
+        undefined -> {noreply, State#state{waiting=[{Call, From}|Waiting]}};
+        _ -> {reply, handle_lookup_element(TableId, Term), State}
+    end;
+handle_call({reset_counters, Counter}, From, State) ->
+    Term = case Counter of
         _ when is_list(Counter) -> 
             [{Item, 0} || Item <- Counter];
         _ when is_atom(Counter) -> 
             [{Counter, 0}]
     end,
-    {reply, ets:insert(TableId, Reset), State};
+    Call = {insert, Term},
+    TableId = State#state.table_id,
+    Waiting = State#state.waiting,
+    case TableId of
+        undefined -> {noreply, State#state{waiting=[{Call, From}|Waiting]}};
+        _ -> {reply, handle_insert(TableId, Term), State}
+    end;
 handle_call(_Request, _From, State) ->
     Reply = {error, unhandled_message},
     {reply, Reply, State}.
@@ -117,10 +155,15 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast({update, Counter, Value}, State) ->
+handle_cast({update, Counter, Value}=Call, State) ->
     TableId = State#state.table_id,
-    ets:update_counter(TableId, Counter, Value),
-    {noreply, State};
+    Waiting = State#state.waiting,
+    State2 = case TableId of
+        undefined -> State#state{waiting=[Call|Waiting]};
+        _ -> handle_update_counter(TableId, Counter, Value), 
+             State
+    end,
+    {noreply, State2};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -135,7 +178,11 @@ handle_cast(_Msg, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_info({'ETS-TRANSFER', TableId, _Pid, _Data}, State) ->
-    {noreply, State#state{table_id=TableId}};
+    [ gen_server:reply(From, perform_call(TableId, Call)) 
+      || {Call, From} <- State#state.waiting ],
+    [ handle_update_counter(TableId, Counter, Value) 
+      || {update, Counter, Value} <- State#state.waiting ],
+    {noreply, State#state{table_id=TableId, waiting=[]}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -168,4 +215,24 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+perform_call(TableId, Call) ->
+    case Call of
+        list ->
+            handle_list(TableId);
+        {insert, Term} ->
+            handle_insert(TableId, Term);
+        {lookup_element, Term} ->
+            handle_lookup_element(TableId, Term)
+    end.
 
+handle_list(TableId) ->
+    ets:tab2list(TableId).
+
+handle_update_counter(TableId, Counter, Value) ->
+    ets:update_counter(TableId, Counter, Value).
+
+handle_insert(TableId, Term) ->
+    ets:insert(TableId, Term).
+
+handle_lookup_element(TableId, Term) ->
+    ets:lookup_element(TableId, Term, 2).

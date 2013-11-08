@@ -17,7 +17,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/3]).
+-export([start_link/3, wait_for_pid/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -125,12 +125,12 @@ handle_info({'ETS-TRANSFER', TableId, _Pid, Data}, State = #state{managee=Manage
     ets:give_away(TableId, ManageePid, Data),
     {noreply, State#state{table_id=TableId}}.
 
-wait_for_pid(Managee) -> 
+wait_for_pid(Managee) when is_atom(Managee), Managee =/= undefined -> 
     case whereis(Managee) of
         undefined -> 
             timer:sleep(1),
             wait_for_pid(Managee);
-        Pid -> Pid
+        ManageePid -> ManageePid
     end.
 
 

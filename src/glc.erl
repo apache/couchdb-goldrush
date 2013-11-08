@@ -63,6 +63,7 @@
 
 -export([
     compile/2,
+    compile/3,
     handle/2,
     delete/1,
     reset_counters/1,
@@ -167,13 +168,22 @@ union(Queries) ->
 %% On success the module representing the query is returned. The module and
 %% data associated with the query must be released using the {@link delete/1}
 %% function. The name of the query module is expected to be unique.
+%% The counters are reset by default, unless Reset is set to false 
 -spec compile(atom(), list()) -> {ok, atom()}.
 compile(Module, Query) ->
+    compile(Module, Query, true).
+
+-spec compile(atom(), list(), boolean()) -> {ok, atom()}.
+compile(Module, Query, Reset) ->
     {ok, ModuleData} = module_data(Module, Query),
     case glc_code:compile(Module, ModuleData) of
+        {ok, Module} when Reset ->
+            reset_counters(Module),
+            {ok, Module};
         {ok, Module} ->
             {ok, Module}
     end.
+
 
 %% @doc Handle an event using a compiled query.
 %%

@@ -12,8 +12,17 @@
 %% ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 %% OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
--module(gr_manager).
 
+%% @doc Process table manager for goldrush.
+%%
+%% Manager responsible for the processes, which serve as heir of the 
+%% {@link gr_counter:start_link/0. <em>Counter</em>} and
+%% {@link gr_param:start_link/0. <em>Param</em>} ets table processes.
+%% This process creates the table and initial data then assigns itself
+%% to inherit the ets table if any process responsible for it is killed.
+%% It then waits to give it back while that process is recreated by its 
+%% supervisor.
+-module(gr_manager).
 -behaviour(gen_server).
 
 %% API
@@ -29,12 +38,14 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {table_id :: ets:tid(), managee :: atom()}).
+-record(state, {table_id :: ets:tab(), managee :: atom()}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
+%% Setup the initial data for the ets table
+-spec setup(atom() | pid(), term()) -> ok.
 setup(Name, Data) ->
     gen_server:cast(Name, {setup, Data}).
 
@@ -42,7 +53,8 @@ setup(Name, Data) ->
 %% @doc
 %% Starts the server
 %%
-%% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
+%% @spec start_link(Name, Managee, Data) -> {ok, Pid} | ignore | 
+%%                                          {error, Error}
 %% @end
 %%--------------------------------------------------------------------
 start_link(Name, Managee, Data) ->
@@ -125,6 +137,9 @@ handle_info({'ETS-TRANSFER', TableId, _Pid, Data}, State = #state{managee=Manage
     ets:give_away(TableId, ManageePid, Data),
     {noreply, State#state{table_id=TableId}}.
 
+%% @doc Wait for a registered process to be associated to a process identifier.
+%% @spec wait_for_pid(Managee) -> ManageePid
+-spec wait_for_pid(atom()) -> pid().
 wait_for_pid(Managee) when is_atom(Managee), Managee =/= undefined -> 
     case whereis(Managee) of
         undefined -> 

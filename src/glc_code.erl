@@ -1,5 +1,24 @@
 %% @doc Code generation functions.
 -module(glc_code).
+-compile({nowarn_unused_function, {abstract_module,2}}).
+-compile({nowarn_unused_function, {abstract_tables,1}}).
+-compile({nowarn_unused_function, {abstract_reset,0}}).
+-compile({nowarn_unused_function, {abstract_filter,2}}).
+-compile({nowarn_unused_function, {abstract_filter_,4}}).
+-compile({nowarn_unused_function, {abstract_opfilter,6}}).
+-compile({nowarn_unused_function, {abstract_all,4}}).
+-compile({nowarn_unused_function, {abstract_any,4}}).
+-compile({nowarn_unused_function, {abstract_with,2}}).
+-compile({nowarn_unused_function, {abstract_getkey,4}}).
+-compile({nowarn_unused_function, {abstract_getkey_,4}}).
+-compile({nowarn_unused_function, {abstract_getparam,3}}).
+-compile({nowarn_unused_function, {abstract_getparam_,3}}).
+-compile({nowarn_unused_function, {param_variable,1}}).
+-compile({nowarn_unused_function, {field_variable,1}}).
+-compile({nowarn_unused_function, {field_variable_,1}}).
+-compile({nowarn_unused_function, {compile_forms,2}}).
+-compile({nowarn_unused_function, {load_binary,2}}).
+
 
 -export([
     compile/2
@@ -165,7 +184,7 @@ abstract_filter(Cond, State) ->
 %% @private Return a list of expressions to apply a filter.
 %% A filter expects two continuation functions which generates the expressions
 %% to apply when the filter matches or fails to match. The state passed to the
-%% functions will be contain all variable bindings to previously accessed
+%% functions will contain all the variable bindings of previously accessed
 %% fields and parameters.
 -spec abstract_filter_(glc_ops:op(), nextFun(), nextFun(), #state{}) ->
         syntaxTree().
@@ -177,6 +196,11 @@ abstract_filter_({Key, '*'}, OnMatch, OnNomatch, State) ->
     abstract_getkey(Key,
         _OnMatch=fun(#state{}=State2) -> OnMatch(State2) end,
         _OnNomatch=fun(State2) -> OnNomatch(State2) end, State);
+abstract_filter_({Key, '!'}, OnMatch, OnNomatch, State) ->
+    abstract_getkey(Key,
+        _OnNomatch=fun(State2) -> OnNomatch(State2) end, 
+        _OnMatch=fun(#state{}=State2) -> OnMatch(State2) end,
+                    State);
 abstract_filter_({Key, Op, Value}, OnMatch, OnNomatch, State)
         when Op =:= '>'; Op =:= '='; Op =:= '<' ->
     Op2 = case Op of '=' -> '=:='; Op -> Op end,
@@ -353,7 +377,7 @@ abstract_getcount(Counter) ->
          ?erl:abstract(Counter)])].
 
 %% @private Return an expression to reset a counter.
--spec abstract_resetcount(atom()) -> [syntaxTree()].
+-spec abstract_resetcount(atom() | [filter | input | output]) -> [syntaxTree()].
 abstract_resetcount(Counter) ->
     [abstract_apply(gr_counter, reset_counters,
         [abstract_apply(table, [?erl:atom(counters)]),

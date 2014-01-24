@@ -12,8 +12,13 @@
 %% ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 %% OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+%% @doc Table manager supervisor for all goldrush ets process tables.
+%%
+%% Manager supervisor responsible for the {@link gr_manager:start_link/3. 
+%% <em>Manager</em>} processes, which serve as heir of the 
+%% {@link gr_counter:start_link/0. <em>Counter</em>} and
+%% {@link gr_param:start_link/0. <em>Param</em>} ets table processes.
 -module(gr_manager_sup).
-
 -behaviour(supervisor).
 
 -type startlink_err() :: {'already_started', pid()} | 'shutdown' | term().

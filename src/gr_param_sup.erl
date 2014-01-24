@@ -12,8 +12,14 @@
 %% ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 %% OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
--module(gr_param_sup).
+%% @doc Second level supervisor for goldrush.
+%%
+%% Supervisor for the {@link gr_param:start_link/0. 
+%% <em>Param</em>}, process table responsible for params
+%% {@link gr_param:start_link/0. <em>Counter</em>} and
+%% their {@link gr_counter:start_link/0. <em>Manager</em>} supervisors.
 
+-module(gr_param_sup).
 -behaviour(supervisor).
 
 -type startlink_err() :: {'already_started', pid()} | 'shutdown' | term().

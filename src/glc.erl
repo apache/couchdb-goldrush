@@ -177,11 +177,11 @@ union(Queries) ->
 %% data associated with the query must be released using the {@link delete/1}
 %% function. The name of the query module is expected to be unique.
 %% The counters are reset by default, unless Reset is set to false 
--spec compile(atom(), list()) -> {ok, atom()}.
+-spec compile(atom(), glc_ops:op() | [glc_ops:op()]) -> {ok, atom()}.
 compile(Module, Query) ->
     compile(Module, Query, true).
 
--spec compile(atom(), list(), boolean()) -> {ok, atom()}.
+-spec compile(atom(), glc_ops:op() | [glc_ops:op()], boolean()) -> {ok, atom()}.
 compile(Module, Query, Reset) ->
     {ok, ModuleData} = module_data(Module, Query),
     case glc_code:compile(Module, ModuleData) of
@@ -228,9 +228,9 @@ delete(Module) ->
     ManageParams = manage_params_name(Module),
     ManageCounts = manage_counts_name(Module),
 
-    [ begin 
-        supervisor:terminate_child(Sup, Name),
-        supervisor:delete_child(Sup, Name)
+    _ = [ begin 
+        ok = supervisor:terminate_child(Sup, Name),
+        ok = supervisor:delete_child(Sup, Name)
       end || {Sup, Name} <- 
         [{gr_manager_sup, ManageParams}, {gr_manager_sup, ManageCounts},
          {gr_param_sup, Params}, {gr_counter_sup, Counts}]
@@ -279,16 +279,16 @@ module_tables(Module) ->
     ManageCounts = manage_counts_name(Module),
     Counters = [{input,0}, {filter,0}, {output,0}],
 
-    supervisor:start_child(gr_param_sup, 
+    _ = supervisor:start_child(gr_param_sup, 
         {Params, {gr_param, start_link, [Params]}, 
         transient, brutal_kill, worker, [Params]}),
-    supervisor:start_child(gr_counter_sup, 
+    _ = supervisor:start_child(gr_counter_sup, 
         {Counts, {gr_counter, start_link, [Counts]}, 
         transient, brutal_kill, worker, [Counts]}),
-    supervisor:start_child(gr_manager_sup, 
+    _ = supervisor:start_child(gr_manager_sup, 
         {ManageParams, {gr_manager, start_link, [ManageParams, Params, []]},
         transient, brutal_kill, worker, [ManageParams]}),
-    supervisor:start_child(gr_manager_sup, {ManageCounts, 
+    _ = supervisor:start_child(gr_manager_sup, {ManageCounts, 
         {gr_manager, start_link, [ManageCounts, Counts, Counters]},
         transient, brutal_kill, worker, [ManageCounts]}),
     [{params,Params}, {counters, Counts}].

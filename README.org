@@ -22,12 +22,12 @@ Goldrush is a small Erlang app that provides fast event stream processing
    with an erlang function. The function will be applied to each
    output event from the query.
 
-# Usage #
+* Usage 
   To use goldrush in your application, you need to define it as a rebar dep or
   include it in erlang's path.
 
 
-Before composing modules, you'll need to define a query. The query syntax is
+Before composing modules, you'll need to define a query. The query syntax 
 matches any number of `{erlang, terms}' and is composed as follows:
 
 * Simple Logic 
@@ -55,7 +55,7 @@ Select all events where 'a' exists.
 
 Select all events where 'a' does not exist.
 #+BEGIN_EXAMPLE
-    glc:nf(a, 0).
+    glc:nf(a).
 #+END_EXAMPLE
 
 Select no input events. User as a black hole query.
@@ -72,22 +72,22 @@ Select all input events. Used as a passthrough query.
 * Combined Logic
  - Combined logic is defined as logic matching multiple event filters
 
-Select all events where both 'a' `and' 'b' exists and are greater than 0.
+Select all events where both 'a' AND 'b' exists and are greater than 0.
 #+BEGIN_EXAMPLE
     glc:all([glc:gt(a, 0), glc:gt(b, 0)]).
 #+END_EXAMPLE
 
-Select all events where 'a' `or' 'b' exists and are greater than 0.
+Select all events where 'a' OR 'b' exists and are greater than 0.
 #+BEGIN_EXAMPLE
     glc:any([glc:gt(a, 0), glc:gt(b, 0)]).
 #+END_EXAMPLE
 
-Select all events where 'a' `and' 'b' exists where 'a' is greater than 1 and 'b' is less than 2.
+Select all events where 'a' AND 'b' exists where 'a' is greater than 1 and 'b' is less than 2.
 #+BEGIN_EXAMPLE
     glc:all([glc:gt(a, 1), glc:lt(b, 2)]).
 #+END_EXAMPLE
 
-Select all events where 'a' `or' 'b' exists where 'a' is greater than 1 and 'b' is less than 2.
+Select all events where 'a' OR 'b' exists where 'a' is greater than 1 and 'b' is less than 2.
 #+BEGIN_EXAMPLE
     glc:any([glc:gt(a, 1), glc:lt(b, 2)]).
 #+END_EXAMPLE
@@ -119,9 +119,7 @@ To compose a module you will take your Query defined above and compile it.
 #+END_EXAMPLE
 
 
-# Handling Events #
-
-At this point you will be able to handle an event using a compiled query. 
+- At this point you will be able to handle an event using a compiled query. 
 
 Begin by constructing an event list.
 #+BEGIN_EXAMPLE
@@ -167,20 +165,24 @@ glc:filter(Module).
 #+END_EXAMPLE
 
 
-## How to build ##
+* Build
 
- `$ ./rebar compile`
+#+BEGIN_EXAMPLE
+ $ ./rebar compile
+#+END_EXAMPLE
 
 or
 
- `$ make`
+#+BEGIN_EXAMPLE
+    $ make
+#+END_EXAMPLE
 
-## CHANGELOG ##
+* CHANGELOG 
 
-### 0.1.6 ###
+0.1.6 
 - Add notfound event matching
 
-### 0.1.5 ###
+0.1.5 
 - Rewrite to make highly crash resilient
   - per module supervision
   - statistics data recovery 

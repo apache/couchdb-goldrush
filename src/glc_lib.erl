@@ -265,7 +265,6 @@ is_valid(_Other) ->
 %% @private Assert that a term is a valid filter.
 %% If the term is a valid filter. The original term will be returned.
 %% If the term is not a valid filter. A `badarg' error is thrown.
--spec valid(glc_ops:op()) -> boolean() | no_return().
 valid(Term) ->
     is_valid(Term) orelse erlang:error(badarg, [Term]),
     Term.

@@ -160,7 +160,7 @@ handle_cast({update, Counter, Value}=Call, State) ->
     Waiting = State#state.waiting,
     State2 = case TableId of
         undefined -> State#state{waiting=[Call|Waiting]};
-        _ -> handle_update_counter(TableId, Counter, Value), 
+        _ -> _ = handle_update_counter(TableId, Counter, Value), 
              State
     end,
     {noreply, State2};
@@ -178,9 +178,9 @@ handle_cast(_Msg, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_info({'ETS-TRANSFER', TableId, _Pid, _Data}, State) ->
-    [ gen_server:reply(From, perform_call(TableId, Call)) 
+    _ = [ gen_server:reply(From, perform_call(TableId, Call)) 
       || {Call, From} <- State#state.waiting ],
-    [ handle_update_counter(TableId, Counter, Value) 
+    _ = [ handle_update_counter(TableId, Counter, Value) 
       || {update, Counter, Value} <- State#state.waiting ],
     {noreply, State#state{table_id=TableId, waiting=[]}};
 handle_info(_Info, State) ->
